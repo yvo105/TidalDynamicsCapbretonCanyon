@@ -14,37 +14,41 @@ import pandas as pd
 from gsw import CT_from_t, Nsquared, SA_from_SP, SP_from_C, density
 from scipy.optimize import curve_fit
 
-from py_functions.data_functions import (
+from py_functions.DataFunctions import (
     calculate_tilt,
     get_tides,
-    load_aquadop,
+    load_aquadopp_data,
     load_obs,
-    ortho_lin_regress,
-    rotate_coordinates,
-    rotate_coordinates_new,
+    orthogonal_linear_regression,
+    add_rotated_velocities,
     z_score_despiking,
     convert_turbidity2SPM,
-    convert_backscatt2SPM,
+    acousticbackscatter_to_spm,
 )
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+### GENERAL PARAMETERS
+ParentDirectory = os.path.dirname(os.getcwd())  # parent directory 
+PicklePath = os.path.join(ParentDirectory, 'Data', 'pickles') # save location of pickles
 
-### LOAD LINEAR REGRESSION RESULTS ###
-# path of save pickles
-path = os.getcwd() + "/pickles/"
-    
-# CTD single casts
-savepath = pathlib.Path(path, "linregress.pickle")
-with open(savepath, "rb") as f:
-    linregress = pickle.load(f)
+
+#%% #*## LOAD REGRESSION DATA ###
+
+TurbRegressPath = pathlib.Path(PicklePath, "linregress.pickle")
+with open(TurbRegressPath, "rb") as f:
+    TurbRegressData = pickle.load(f)
 
 # Results from logarithmic regression of ADCP data
-savepath = pathlib.Path(path, "acoustic_logregression.pickle")
-with open(savepath, "rb") as f:
-    acoustic_logregress = pickle.load(f)
+AcousticRegressPath = pathlib.Path(PicklePath, "acoustic_logregression.pickle")
+with open(AcousticRegressPath, "rb") as f:
+    AcousticRegressData = pickle.load(f)
 
 #%% #*## GENERAL INFO ###
+'''
+This section writes general information about the moorings and the bottom lander such as
+time of deployment, time of recovery, etc.
+'''
 
 #TODO: lon/lat data is according to shipsdata, values should be updated with USBL position
 
@@ -101,20 +105,26 @@ bobo_general = {
     
 }
 
-#%% #*### AQUADOP DATA - MOORINGS & BOBO ####
+#%% #*### LOAD AQUADOPP DATA - MOORINGS & BOBO ####
+'''
+This sections loads the aquadop data from the raw csv files via the function "load_aquadopp_data". 
+Furthermore, a noise floor threshold is applied, tilt is calculated for data QA and high and low tide timestamps are extracted.
+'''
 
 #*## MOORING 1 ###
 
-# filepaths and id
-fp_m1 = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/Mooring1_data/'
-id_m1 = 'FLOCM113'  # sensor id
+# general setup parameters
+fp_m1 = os.path.join(ParentDirectory, 'Data', 'Nortek_Aquadopp', 'Mooring1_data')
+id_m1 = 'FLOCM113'  # sensor id as taken from cruise report
 noisefloor_m1 = 25 # noise floor for noise removal [counts], based on exponential decay of amplitude data with distance from sensor, see ADCP_qualitycheck.py
 
 # load raw sensor data
-m1_aquadop = load_aquadop(fp_m1, id_m1)
+m1_aquadop = load_aquadopp_data(
+    FilePath=fp_m1,
+    SensorID=id_m1
+    )
 
-
-
+#! Remove after powerpoint is finished
 # create single amplitude data (mean of all beams)
 # amp_stacked = np.stack( ## stack all beam amplitude data
 #         (m1_aquadop['amp_beam1_raw'][0],
@@ -126,8 +136,7 @@ m1_aquadop = load_aquadop(fp_m1, id_m1)
 # amp_df = pd.DataFrame(amp_mean, index=m1_aquadop['amp_beam1_raw'][0].index)
 # m1_aquadop['amp_beammean_raw'] = (amp_df, 'counts')
 
-## remove amplitude data based on noise floor (replaced with np.nan)
-# amplitude data
+# remove amplitude data based on noise floor (replaced with np.nan)
 m1_aquadop['amp_beam1'] = (m1_aquadop['amp_beam1_raw'][0].copy(), 'counts')
 m1_aquadop['amp_beam1'][0][m1_aquadop['amp_beam1_raw'][0] < noisefloor_m1] = np.nan
 m1_aquadop['amp_beam2'] = (m1_aquadop['amp_beam2_raw'][0].copy(), 'counts')
@@ -135,7 +144,7 @@ m1_aquadop['amp_beam2'][0][m1_aquadop['amp_beam2_raw'][0] < noisefloor_m1] = np.
 m1_aquadop['amp_beam3'] = (m1_aquadop['amp_beam3_raw'][0].copy(), 'counts')
 m1_aquadop['amp_beam3'][0][m1_aquadop['amp_beam3_raw'][0] < noisefloor_m1] = np.nan
 
-# velocity data
+# remove velocity data based on noise floor (replaced with np.nan)
 m1_aquadop['vel_east'] = (m1_aquadop['vel_east_raw'][0].copy(), 'm/s')
 m1_aquadop['vel_east'][0][np.isnan(m1_aquadop['amp_beam1'][0])] = np.nan
 m1_aquadop['vel_north'] = (m1_aquadop['vel_north_raw'][0].copy(), 'm/s')
@@ -147,29 +156,37 @@ m1_aquadop['vel_up'][0][np.isnan(m1_aquadop['amp_beam3'][0])] = np.nan
 # additional calculated variables
 m1_aquadop['vel_magnitude_2D'] = (np.sqrt(m1_aquadop['vel_east'][0]**2 + m1_aquadop['vel_north'][0]**2), 'm/s')
 m1_aquadop['vel_magnitude_3D'] = (np.sqrt(m1_aquadop['vel_east'][0]**2 + m1_aquadop['vel_north'][0]**2 + m1_aquadop["vel_up"][0]**2), 'm/s')
-
-# calculate 2D velocity direction
 m1_aquadop['vel_direction_2D'] = (np.arctan2(m1_aquadop['vel_east'][0], m1_aquadop['vel_north'][0]), 'radians')
 
 # calculate tilt
-m1_aquadop['tilt'] = (calculate_tilt(m1_aquadop['pitch'][0], m1_aquadop['roll'][0]), 'deg')
+m1_aquadop['tilt'] = (calculate_tilt(
+    Pitch=m1_aquadop['pitch'][0], 
+    Roll=m1_aquadop['roll'][0],
+    InputInDegrees=True,
+    OutputInDegrees=True), 'deg')
 
 # extract high and low tide times from ADCP data
 lim_tod, lim_tor = m1_general['ToD']+timedelta(hours=1), m1_general['ToR']-timedelta(hours=1)
-m1_high, m1_low = get_tides(m1_aquadop['pressure'][0].loc[lim_tod:lim_tor])
+m1_high, m1_low = get_tides(
+    dataseries=m1_aquadop['pressure'][0].loc[lim_tod:lim_tor]
+    )
 m1_aquadop['high tide'] = (m1_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[m1_high[0]], 'dbar')
 m1_aquadop['low tide'] = (m1_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[m1_low[0]], 'dbar')
 
 #*## Mooring 2 ###
 
 # filepath and id
-fp_m2 = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/Mooring2_data/'
-id_m2 = 'FLOCM204' # sensor id
+fp_m2 = os.path.join(ParentDirectory, 'Data', 'Nortek_Aquadopp', 'Mooring2_data')
+id_m2 = 'FLOCM204' # sensor id as taken from cruise report
 noisefloor_m2 = 25 # noise floor for noise removal [counts], based on exponential decay of amplitude data with distance from sensor, see ADCP_qualitycheck.py
 
 # load raw sensor data
-m2_aquadop = load_aquadop(fp_m2, id_m2)
+m2_aquadop = load_aquadopp_data(
+    FilePath=fp_m2,
+    SensorID=id_m2
+    )
 
+#! Remove after powerpoint is finished
 # # create single amplitude data (mean of all beams)
 # amp_stacked = np.stack( ## stack all beam amplitude data
 #         (m2_aquadop['amp_beam1_raw'][0],
@@ -181,8 +198,7 @@ m2_aquadop = load_aquadop(fp_m2, id_m2)
 # amp_df = pd.DataFrame(amp_mean, index=m2_aquadop['amp_beam1_raw'][0].index)
 # m2_aquadop['amp_beam_raw'] = (amp_df, 'counts')
 
-## remove signal based on noise floor
-# amplitude data
+# remove amplitude data based on noise floor (replaced with np.nan)
 m2_aquadop['amp_beam1'] = (m2_aquadop['amp_beam1_raw'][0].copy(), 'counts')
 m2_aquadop['amp_beam1'][0][m2_aquadop['amp_beam1_raw'][0] < noisefloor_m2] = np.nan
 m2_aquadop['amp_beam2'] = (m2_aquadop['amp_beam2_raw'][0].copy(), 'counts')
@@ -190,7 +206,7 @@ m2_aquadop['amp_beam2'][0][m2_aquadop['amp_beam2_raw'][0] < noisefloor_m2] = np.
 m2_aquadop['amp_beam3'] = (m2_aquadop['amp_beam3_raw'][0].copy(), 'counts')
 m2_aquadop['amp_beam3'][0][m2_aquadop['amp_beam3_raw'][0] < noisefloor_m2] = np.nan
 
-# velocity data
+# remove velocity data based on noise floor (replaced with np.nan)
 m2_aquadop['vel_east'] = (m2_aquadop['vel_east_raw'][0].copy(), 'm/s')
 m2_aquadop['vel_east'][0][np.isnan(m2_aquadop['amp_beam1'][0])] = np.nan
 m2_aquadop['vel_north'] = (m2_aquadop['vel_north_raw'][0].copy(), 'm/s')
@@ -204,24 +220,35 @@ m2_aquadop['vel_magnitude_3D'] = (np.sqrt(m2_aquadop['vel_east'][0]**2 + m2_aqua
 m2_aquadop['vel_direction_2D'] =  (np.arctan2(m2_aquadop['vel_north'][0], m2_aquadop['vel_east'][0]), 'radians')
 
 # calculate tilt
-m2_aquadop['tilt'] = (calculate_tilt(m2_aquadop['pitch'][0], m2_aquadop['roll'][0]), 'deg')
+m2_aquadop['tilt'] = (calculate_tilt(
+    Pitch=m2_aquadop['pitch'][0],
+    Roll=m2_aquadop['roll'][0],
+    InputInDegrees=True,
+    OutputInDegrees=True), 'deg')
 
 # extract high and low tide times from ADCP data
 lim_tod, lim_tor = m2_general['ToD'] + timedelta(hours=2), m2_general['ToR'] - timedelta(hours=2)
-m2_high, m2_low = get_tides(m2_aquadop['pressure'][0].loc[lim_tod:lim_tor])
+m2_high, m2_low = get_tides(
+    dataseries=m2_aquadop['pressure'][0].loc[lim_tod:lim_tor]
+    )
 m2_aquadop['high tide'] = (m2_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[m2_high[0]], 'dbar')
 m2_aquadop['low tide'] = (m2_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[m2_low[0]], 'dbar')
 
 #*## MOORING 3 ###
 
 # filepath and id
-fp_m3 = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/Mooring3_data/'
-id_m3 = 'FLOCM314'  # sensor id
+fp_m3 = os.path.join(ParentDirectory, 'Data', 'Nortek_Aquadopp', 'Mooring3_data')
+id_m3 = 'FLOCM314'  # sensor id as taken from cruise report
 noisefloor_m3 = 25 # noise floor for noise removal [counts], based on exponential decay of amplitude data with distance from sensor, see ADCP_qualitycheck.py
 
 # load raw sensor data
-m3_aquadop = load_aquadop(fp_m3, id_m3)
+m3_aquadop = load_aquadopp_data(
+    FilePath=fp_m3,
+    SensorID=id_m3
+    )
 
+
+#! Remove after powerpoint is finished
 # # create single amplitude data (mean of all beams)
 # amp_stacked = np.stack( ## stack all beam amplitude data
 #         (m3_aquadop['amp_beam1_raw'][0],
@@ -233,8 +260,7 @@ m3_aquadop = load_aquadop(fp_m3, id_m3)
 # amp_df = pd.DataFrame(amp_mean, index=m3_aquadop['amp_beam1_raw'][0].index)
 # m3_aquadop['amp_beam_raw'] = (amp_df, 'counts')
 
-## remove signal based on noise floor
-# amplitude data
+# remove amplitude data based on noise floor (replaced with np.nan)
 m3_aquadop['amp_beam1'] = (m3_aquadop['amp_beam1_raw'][0].copy(), 'counts')
 m3_aquadop['amp_beam1'][0][m3_aquadop['amp_beam1_raw'][0] < noisefloor_m3] = np.nan
 m3_aquadop['amp_beam2'] = (m3_aquadop['amp_beam2_raw'][0].copy(), 'counts')
@@ -242,7 +268,7 @@ m3_aquadop['amp_beam2'][0][m3_aquadop['amp_beam2_raw'][0] < noisefloor_m3] = np.
 m3_aquadop['amp_beam3'] = (m3_aquadop['amp_beam3_raw'][0].copy(), 'counts')
 m3_aquadop['amp_beam3'][0][m3_aquadop['amp_beam3_raw'][0] < noisefloor_m3] = np.nan
 
-# velocity data
+# remove velocity data based on noise floor (replaced with np.nan)
 m3_aquadop['vel_east'] = (m3_aquadop['vel_east_raw'][0].copy(), 'm/s')
 m3_aquadop['vel_east'][0][np.isnan(m3_aquadop['amp_beam1'][0])] = np.nan
 m3_aquadop['vel_north'] = (m3_aquadop['vel_north_raw'][0].copy(), 'm/s')
@@ -256,24 +282,34 @@ m3_aquadop['vel_magnitude_3D'] = (np.sqrt(m3_aquadop['vel_east'][0]**2 + m3_aqua
 m3_aquadop['vel_direction_2D'] =  (np.arctan2(m3_aquadop['vel_north'][0], m3_aquadop['vel_east'][0]), 'radians')
 
 # calculate tilt
-m3_aquadop['tilt'] = (calculate_tilt(m3_aquadop['pitch'][0], m3_aquadop['roll'][0]), 'deg')
+m3_aquadop['tilt'] = (calculate_tilt(
+    Pitch=m3_aquadop['pitch'][0],
+    Roll=m3_aquadop['roll'][0],
+    InputInDegrees=True,
+    OutputInDegrees=True), 'deg')
 
 # extract high and low tide times from ADCP data
 lim_tod, lim_tor = m3_general['ToD']+timedelta(hours=2), m3_general['ToR']-timedelta(hours=2)
-m3_high, m3_low = get_tides(m3_aquadop['pressure'][0].loc[lim_tod:lim_tor])
+m3_high, m3_low = get_tides(
+    dataseries=m3_aquadop['pressure'][0].loc[lim_tod:lim_tor]
+    )
 m3_aquadop['high tide'] = (m3_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[m3_high[0]], 'dbar')
 m3_aquadop['low tide'] = (m3_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[m3_low[0]], 'dbar')
 
 #*## BOBO LANDER ###
 
 # filepath and id
-fp_bobo = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/BoBo_data/'
-id_bobo = 'FLOCBO10'  # sensor id
+fp_bobo = os.path.join(ParentDirectory, 'Data', 'Nortek_Aquadopp', 'BoBo_data')
+id_bobo = 'FLOCBO10'  # sensor id as taken from cruise report
 noisefloor_bobo = 25 # noise floor for noise removal [counts], based on exponential decay of amplitude data with distance from sensor, see ADCP_qualitycheck.py
 
 # load raw sensor data
-bobo_aquadop = load_aquadop(fp_bobo, id_bobo)
+bobo_aquadop = load_aquadopp_data(
+    FilePath=fp_bobo,
+    SensorID=id_bobo
+    )
 
+#! Remove after powerpoint is finished
 # # create single amplitude data (mean of all beams)
 # amp_stacked = np.stack( ## stack all beam amplitude data
 #         (bobo_aquadop['amp_beam1_raw'][0],
@@ -285,8 +321,7 @@ bobo_aquadop = load_aquadop(fp_bobo, id_bobo)
 # amp_df = pd.DataFrame(amp_mean, index=bobo_aquadop['amp_beam1_raw'][0].index)
 # bobo_aquadop['amp_beam_raw'] = (amp_df, 'counts')
 
-## remove signal based on noise floor
-# amplitude data
+# remove amplitude data based on noise floor (replaced with np.nan)
 bobo_aquadop['amp_beam1'] = (bobo_aquadop['amp_beam1_raw'][0].copy(), 'counts')
 bobo_aquadop['amp_beam1'][0][bobo_aquadop['amp_beam1_raw'][0] < noisefloor_bobo] = np.nan
 bobo_aquadop['amp_beam2'] = (bobo_aquadop['amp_beam2_raw'][0].copy(), 'counts')
@@ -294,7 +329,7 @@ bobo_aquadop['amp_beam2'][0][bobo_aquadop['amp_beam2_raw'][0] < noisefloor_bobo]
 bobo_aquadop['amp_beam3'] = (bobo_aquadop['amp_beam3_raw'][0].copy(), 'counts')
 bobo_aquadop['amp_beam3'][0][bobo_aquadop['amp_beam3_raw'][0] < noisefloor_bobo] = np.nan
 
-# velocity data
+# remove velocity data based on noise floor (replaced with np.nan)
 bobo_aquadop['vel_east'] = (bobo_aquadop['vel_east_raw'][0].copy(), 'm/s')
 bobo_aquadop['vel_east'][0][np.isnan(bobo_aquadop['amp_beam1'][0])] = np.nan
 bobo_aquadop['vel_north'] = (bobo_aquadop['vel_north_raw'][0].copy(), 'm/s')
@@ -308,80 +343,134 @@ bobo_aquadop['vel_magnitude_3D'] = (np.sqrt(bobo_aquadop['vel_east'][0]**2 + bob
 bobo_aquadop['vel_direction_2D'] =  (np.arctan2(bobo_aquadop['vel_north'][0], bobo_aquadop['vel_east'][0]), bobo_aquadop['vel_east'][1])
 
 # calculate tilt
-bobo_aquadop['tilt'] = (calculate_tilt(bobo_aquadop['pitch'][0], bobo_aquadop['roll'][0]), 'deg')
+bobo_aquadop['tilt'] = (calculate_tilt(
+    Pitch=bobo_aquadop['pitch'][0],
+    Roll=bobo_aquadop['roll'][0],
+    InputInDegrees=True,
+    OutputInDegrees=True), 'deg')
 
 # extract high and low tide times from ADCP data
 lim_tod, lim_tor = bobo_general['ToD']+timedelta(hours=2), bobo_general['ToR']-timedelta(hours=2) 
-bobo_high, bobo_low = get_tides(bobo_aquadop['pressure'][0].loc[lim_tod:lim_tor])
+bobo_high, bobo_low = get_tides(
+    dataseries=bobo_aquadop['pressure'][0].loc[lim_tod:lim_tor]
+    )
 bobo_aquadop['high tide'] = (bobo_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[bobo_high[0]], 'dbar')
 bobo_aquadop['low tide'] = (bobo_aquadop['pressure'][0].loc[lim_tod:lim_tor].iloc[bobo_low[0]], 'dbar')
 
 
     
-#%% #*### AQUADOP DATA - ORTHOGONAL LINEAR REGRESSION ####
+#%% #*### AQUADOPP DATA - ORTHOGONAL LINEAR REGRESSION ####
+'''
+Performs an orthogonal linear regression on the ADCP data (Aquadopp) and saves the results 
+in a dictionary using the ortho_lin_regress function. 
+Results are obtained per depth bin and only from first high tide to last high tide to avoid any
+distortions due to uncompleted tidal cycles. 
+The mean slope of the orthogonal regression over all depth bins is then used to define the 
+along- and crosscanyon directions at the respective location.
+'''
 
-#* Mooring 1
+#*## Mooring 1
+
+olr_m1 = orthogonal_linear_regression(
+    DataDictionary=m1_aquadop, 
+    GeneralDataDictionary=m1_general,
+    PlotBool=False,
+    PrintBool=False
+    )  
+m1_general['OLR'] = olr_m1  # save olr results in general dictionary
+m1_aquadop = add_rotated_velocities(  # update aquadop dictionary with up and downcanyon velocities
+    DataDictionary=m1_aquadop,
+    CanyonDirection=olr_m1['BinMean'],
+    HighBinLimit=20,
+    LowBinLimit=0
+    )  
+
+#*## Mooring 2
+
+olr_m2 = orthogonal_linear_regression(
+    DataDictionary=m2_aquadop,
+    GeneralDataDictionary=m2_general,
+    PlotBool=False,
+    PrintBool=False
+    )  
+m2_general['OLR'] = olr_m2  # save olr results in general dictionary
+m2_aquadop = add_rotated_velocities(
+    DataDictionary=m2_aquadop,
+    CanyonDirection=olr_m2['BinMean'],
+    HighBinLimit=20,
+    LowBinLimit=0
+    )  # update dictionary with up and downcanyon velocities
+
+
+#*## Mooring 3
 
 # orthogonal linear regression
-olr_m1 = ortho_lin_regress(m1_aquadop, m1_general, plotbool=False, printbool=False)
-
-# save olr results in general dictionary
-m1_general['OLR'] = olr_m1
-
-# update dictionary with up and downcanyon velocities
-m1_aquadop = rotate_coordinates(m1_aquadop, olr_m1['BinMean'],  20)
-
-
-#* Mooring 2
-
-# orthogonal linear regression
-olr_m2 = ortho_lin_regress(m2_aquadop, m2_general, plotbool=False, printbool=False)
-
-# save olr results in general dictionary
-m2_general['OLR'] = olr_m2
-
-# update dictionary with up and downcanyon velocities
-m2_aquadop = rotate_coordinates(m2_aquadop, olr_m2['BinMean'],  20)
-
-
-#* Mooring 3
-
-# orthogonal linear regression
-olr_m3 = ortho_lin_regress(m3_aquadop, m3_general, plotbool=False, printbool=False)
+olr_m3 = orthogonal_linear_regression(
+    DataDictionary=m3_aquadop,
+    GeneralDataDictionary=m3_general,
+    PlotBool=False,
+    PrintBool=False
+    )
 
 # save olr results in general dictionary
 m3_general['OLR'] = olr_m3
 
 # update dictionary with up and downcanyon velocities
-m3_aquadop = rotate_coordinates(m3_aquadop, olr_m3['BinMean'],  20)
+m3_aquadop = add_rotated_velocities(
+    DataDictionary=m3_aquadop,
+    CanyonDirection=olr_m3['BinMean'],
+    HighBinLimit=20,
+    LowBinLimit=0
+    )
 
 
-#* BoBo Lander
+#*## BoBo Lander
 
 # orthogonal linear regression
-olr_bobo = ortho_lin_regress(bobo_aquadop, bobo_general, plotbool=False, printbool=False)
+olr_bobo = orthogonal_linear_regression(
+    DataDictionary=bobo_aquadop,
+    GeneralDataDictionary=bobo_general,
+    PlotBool=False,
+    PrintBool=False
+    )
 
 # save olr results in general dictionary
 bobo_general['OLR'] = olr_bobo
 
 # update dictionary with up and downcanyon velocities
-bobo_aquadop = rotate_coordinates(bobo_aquadop, olr_bobo['BinMean'],  20)
+bobo_aquadop = add_rotated_velocities(
+    DataDictionary=bobo_aquadop,
+    CanyonDirection=olr_bobo['BinMean'],
+    HighBinLimit=20,
+    LowBinLimit=0
+    )
 
 
-#%% #*### AQUADOP DATA - CTD ####
+#%% #*### LOAD AQUADOPP DATA - CTD FRAME ####
+'''
+This sections loads the aquadop data from the raw csv files via the function "load_aquadopp_data". 
+It only extracts data from the CTD casts at the research stations and not from the transect.
+'''
 
-#*## GENERAL SETUP ###
 
-# filepath of ctd-station data
-fp_ctd = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/CTD_data/Stations/'
+#*## GENERAL SETUP 
 
-## relevant lists
-foldernames = [folder for folder in os.listdir(fp_ctd) if os.path.isdir(os.path.join(fp_ctd, folder))]  # list of folder names
-fplist = [fp_ctd+folder+'/' for folder in foldernames]  # create list of filepaths
-stationlist = [folder.split('_')[1] for folder in foldernames] # list of station names
+filepath_ctd = os.path.join(
+    ParentDirectory,'Data', 'Nortek_Aquadopp', 'CTD_data', 'Stations' 
+    )  # filepath for CTD data
 
-# result dictionary
-aqdp_ctddata = {station: {"cast_1": None, "cast_2": None} for station in sorted(set(stationlist))} 
+folders_ctd = [
+    folder for folder in os.listdir(filepath_ctd)
+    if os.path.isdir(os.path.join(filepath_ctd, folder))
+    ] # list of folder names
+
+filepathlist_ctd = [os.path.join(filepath_ctd,folder) for folder in folders_ctd]  # create list of filepaths
+
+stationlist = [folder.split('_')[1] for folder in folders_ctd] # list of station names
+
+aqdp_ctddata = {  
+    station: {"cast_1": None, "cast_2": None} for station in sorted(set(stationlist))
+    } # result dictionary
 
 noisefloor_ctd = 20 # noise floor for noise removal [counts], based on exponential decay of amplitude data with distance from sensor, see ADCP_qualitycheck.py
 
@@ -393,16 +482,19 @@ canyonaxis_dic = {
     'Station5': 45,
 }
 
-#*## DATA ###
+#*## DATA
 
 # iterate over each folder/filepath
-for filepath in fplist:
+for filepath in filepathlist_ctd:
     
-    # find serial of cast
+    # find serial of cast, extracted from arbitrary file in folder, here .a1 file
     ctd_serial_temp = [f for f in os.listdir(filepath) if fnmatch.fnmatch(f, '*.a1')]
     
-    # read raw data
-    ctd_aquadop_temp = load_aquadop(filepath, ctd_serial_temp[0][:-3])
+    # read data
+    ctd_aquadop_temp = load_aquadopp_data(
+        FilePath=filepath,
+        SensorID=ctd_serial_temp[0][:-3]
+        )
     
     # create single amplitude data (mean of all beams)
     amp_stacked = np.stack( ## stack all beam amplitude data
@@ -415,11 +507,11 @@ for filepath in fplist:
     amp_df = pd.DataFrame(amp_mean, index=ctd_aquadop_temp['amp_beam1_raw'][0].index)
     ctd_aquadop_temp['amp_beam_raw'] = (amp_df, 'counts')
     
-    ## remove noise based on noisefloor
-    # amplitude data
+    # remove amplitude data based on noise floor (replaced with np.nan)
     ctd_aquadop_temp['amp_beam'] = (ctd_aquadop_temp['amp_beam_raw'][0].copy(), 'counts')
     ctd_aquadop_temp['amp_beam'][0][ctd_aquadop_temp['amp_beam'][0] < noisefloor_ctd] = np.nan
-    # velocity data
+    
+    # remove velocity data based on noise floor (replaced with np.nan)
     ctd_aquadop_temp['vel_east'] = (ctd_aquadop_temp['vel_east_raw'][0].copy(), 'm/s')
     ctd_aquadop_temp['vel_east'][0][np.isnan(ctd_aquadop_temp['amp_beam'][0])] = np.nan
     ctd_aquadop_temp['vel_north'] = (ctd_aquadop_temp['vel_north_raw'][0].copy(), 'm/s')
@@ -430,32 +522,69 @@ for filepath in fplist:
     # additional calculated variables
     ctd_aquadop_temp['vel_magnitude_2D'] = (np.sqrt(ctd_aquadop_temp['vel_east'][0]**2 + ctd_aquadop_temp['vel_north'][0]**2), 'm/s')
     ctd_aquadop_temp['vel_magnitude_3D'] = (np.sqrt(ctd_aquadop_temp['vel_east'][0]**2 + ctd_aquadop_temp['vel_north'][0]**2 + ctd_aquadop_temp["vel_up"][0]**2), 'm/s')
-
-    # calculate 2D velocity direction
     ctd_aquadop_temp['vel_direction_2D'] = (np.arctan2(ctd_aquadop_temp['vel_east'][0], ctd_aquadop_temp['vel_north'][0]), 'radians')
 
     # calculate tilt
-    ctd_aquadop_temp['tilt'] = (calculate_tilt(ctd_aquadop_temp['pitch'][0], ctd_aquadop_temp['roll'][0]), 'deg')
+    ctd_aquadop_temp['tilt'] = (
+        calculate_tilt(
+        Pitch=ctd_aquadop_temp['pitch'][0],
+        Roll=ctd_aquadop_temp['roll'][0],
+        InputInDegrees=True, 
+        OutputInDegrees=True
+        ),
+        'deg')
     
-    # calculate SPM, based on readings of first
-    ctd_aquadop_temp['SPM[mg/L]'] = (convert_backscatt2SPM(ctd_aquadop_temp['amp_beam'][0].iloc[:,:2].mean(axis=1),acoustic_logregress['a'], acoustic_logregress['b']), 'mg/L')
+    # convert mean acoustic backscatter values to spm using logarithmic regression. More Details in LinearRegression_Acoustic.py
+    ctd_aquadop_temp['SPM[mg/L]'] = (
+        acousticbackscatter_to_spm(
+        BackscatterData=ctd_aquadop_temp['amp_beam'][0].iloc[:,:2].mean(axis=1),
+        RegressionParameterA=AcousticRegressData['a'],
+        RegressionParameterB=AcousticRegressData['b']
+        ),
+        'mg/L')
     
-    # find station name and assign either cast_1 or cast_2 indicator -> usually singlecast is cast_1 and yoyo is cast_2 (apart from Station1 and Station8)
-    ctd_station_temp = filepath.split('/')[-2].split('_')[1]
+    # find station name and assign either cast_1 or cast_2 indicator -> usually singlecast is cast_1 and yoyo is cast_2 (exceptions are Station1 and Station8; no yoyo casts done at Station1, no singlecasts done at Station8)
+    ctd_station_temp = filepath.split('\\')[-1].split('_')[1]
     
     # calculate along & cross canyon velocities
     if ctd_station_temp in ['Station8']:
-        ctd_aquadop_temp = rotate_coordinates(ctd_aquadop_temp,m1_general['OLR']['BinMean'],m1_general['max_aquadop_bin'])
+        ctd_aquadop_temp = add_rotated_velocities(
+            DataDictionary=ctd_aquadop_temp,
+            CanyonDirection=m1_general['OLR']['BinMean'],
+            HighBinLimit=19, # maximum bin index since noise threshold is already accounted for
+            LowBinLimit=0
+            )
     elif ctd_station_temp in ['Station7']:
-        ctd_aquadop_temp = rotate_coordinates(ctd_aquadop_temp, m2_general['OLR']['BinMean'], m2_general['max_aquadop_bin'])
+        ctd_aquadop_temp = add_rotated_velocities(
+            DataDictionary=ctd_aquadop_temp,
+            CanyonDirection=m2_general['OLR']['BinMean'],
+            HighBinLimit=19,  # maximum bin index since noise threshold is already accounted for
+            LowBinLimit=0
+            )
     elif ctd_station_temp in ['Station6']:
-        ctd_aquadop_temp = rotate_coordinates(ctd_aquadop_temp, m3_general['OLR']['BinMean'], m3_general['max_aquadop_bin'])
+        ctd_aquadop_temp = add_rotated_velocities(
+            DataDictionary=ctd_aquadop_temp,
+            CanyonDirection=m3_general['OLR']['BinMean'],
+            HighBinLimit=19,  # maximum bin index since noise threshold is already accounted for
+            LowBinLimit=0
+            )
     elif ctd_station_temp in ['Station4']:
-        ctd_aquadop_temp = rotate_coordinates(ctd_aquadop_temp, bobo_general['OLR']['BinMean'], bobo_general['max_aquadop_bin'])
+        ctd_aquadop_temp = add_rotated_velocities(
+            DataDictionary=ctd_aquadop_temp,
+            CanyonDirection=bobo_general['OLR']['BinMean'],
+            HighBinLimit=19,  # maximum bin index since noise threshold is already accounted for
+            LowBinLimit=0
+            )
     else:
-        ctd_aquadop_temp = rotate_coordinates(ctd_aquadop_temp,canyonaxis_dic[ctd_station_temp], 19)
+        ctd_aquadop_temp = add_rotated_velocities(
+            DataDictionary=ctd_aquadop_temp,
+            CanyonDirection=canyonaxis_dic[ctd_station_temp],
+            HighBinLimit=19,  # maximum bin index since noise threshold is already accounted for
+            LowBinLimit=0
+            )
     
-    if filepath.split('/')[-2].split('_')[2] in ['singlecast']:
+    # assign cast indicators so that result is saved in the correct subdictionary
+    if filepath.split('\\')[-1].split('_')[2] in ['singlecast']:
         castindicator = 'cast_1'
     else:
         castindicator = 'cast_2' 
@@ -464,17 +593,17 @@ for filepath in fplist:
     aqdp_ctddata[ctd_station_temp][castindicator] = ctd_aquadop_temp 
 
 
-#%% #*## OBS DATA - MOORINGS & BOBO ###
+#%% ### LOAD OBS DATA - MOORINGS & BOBO ###
 
-#*## GENERAL PARAMETERS ### 
+#*## GENERAL PARAMETERS 
 
-fp_jfe = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS'  # general filepath
+fp_jfe = os.path.join(ParentDirectory, 'Data', 'JFE_OBS')
 windowsize = 60 # window size for rolling mean [s]
-std_threshold = 3 # threshold for standard deviation of rolling mean
+std_threshold = 3 # threshold for standard deviation of rolling mean, used as threshold for despiking the data
 unreal_threshold = 50 # threshold for unrealistically high values
 
 
-#*## MOORING 1 ###
+#*## MOORING 1 
 
 fp_m1_obs = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS/Mooring_data/M1/'
 serials_obs_m1 = np.array(['08','10','11','15'])
@@ -510,7 +639,7 @@ bobo_obs = {'turb_1mab': (obsdata_bobo['Turb.-M[FTU]'], 'FTU'),
 
 
 
-#%% #*## MICROCAT DATA ### 
+#%% ### MICROCAT DATA ### 
 
 ### Mooring 3 ###
 
@@ -554,7 +683,7 @@ m3_microcat['density [kg/m^3]'] = density.rho(m3_microcat['SA [g/kg]'], m3_micro
 
 
 
-#%% #*## CTD DATA ###
+#%% ### CTD DATA ###
 
 
 ### GENERAL PARAMETERS ###
@@ -936,7 +1065,7 @@ for filename in filenames:
         ctddata_yoyo[f'{name}_general'] = generalinfo
         ctddata_yoyo[f'{name}_despiked'] = data_despiked
 
-#%% #*## CTD - ADDITIONAL CALCULATIONS ###
+#%% ### CTD - ADDITIONAL CALCULATIONS ###
 
 # create temporary dictionary for results
 temp_dict = {}
@@ -1015,7 +1144,7 @@ for yoyo in yoyo_keys_normal:
 # update dictionary with N2 data
 ctddata_yoyo.update(temp_dict)
 
-#%% #*## CANYON DATA ###
+#%% ### CANYON DATA ###
 
 # read elevation profile
 elevation = pd.read_csv('C:/Users/werne/Documents/UniUtrecht/MasterThesis/CanyonData/elevationprofile_highresolution_downcanyon.csv', delimiter=',', dtype=float, decimal=',') 
@@ -1040,7 +1169,7 @@ elevation['Elevation_fitted'] = func(elevation['Distance'], a, b, c)
 # fitted slope
 elevation['slope_fitted'] = np.gradient(elevation['Elevation_fitted'], elevation['Distance'])
 
-#%% #*## OBS DATA - CTD CASTS ###
+#%% ### OBS DATA - CTD CASTS ###
 
 
 ### GENERAL PARAMETERS ### 
@@ -1200,7 +1329,7 @@ for cast in allcastslist:
         jfe_dict_yoyo[cast] = {position: df for position, df in zip(positionlist, df_list)}
 
 
-#%% #*## MICROCAT DATA ### 
+#%% ### MICROCAT DATA ### 
 
 ### Mooring 3 ###
 
@@ -1241,7 +1370,7 @@ m3_microcat['density [kg/m^3]'] = density.rho(m3_microcat['SA [g/kg]'], m3_micro
 # calculate buyoancy frequency
 
 
-#%% #*## FILTER WEIGHT DATA ###
+#%% ### FILTER WEIGHT DATA ###
 
 # filepath of csv files
 filepath = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Filters/'
@@ -1260,7 +1389,7 @@ spm_df_full = spm_df_full.drop(columns=spm_df_full.columns.difference(columns_to
 
 
 
-#%% #*## DICTIONARIES ###
+#%% ### DICTIONARIES ###
 
 # dictionary for BoBo Lander
 bobodata = {'aquadop': bobo_aquadop,
@@ -1303,7 +1432,7 @@ obscastdata = {'all': jfe_dict_all,
             'yoyos': jfe_dict_yoyo, 
             }
 
-#%% #*## SAVE ###
+#%% ### SAVE ###
 
 path = os.getcwd() + '/pickles/'  # path of current working directory plus pickle folder
 
@@ -1359,4 +1488,3 @@ savepath = pathlib.Path(path, 'adcp_ctddata.pickle')
 with open(savepath, 'wb') as f:
     pickle.dump(aqdp_ctddata, f)
 
-# %%
