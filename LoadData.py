@@ -18,11 +18,11 @@ from py_functions.DataFunctions import (
     calculate_tilt,
     get_tides,
     load_aquadopp_data,
-    load_obs,
+    load_obs_data,
     orthogonal_linear_regression,
     add_rotated_velocities,
     z_score_despiking,
-    convert_turbidity2SPM,
+    opticalbackscatter_to_spm,
     acousticbackscatter_to_spm,
 )
 
@@ -485,14 +485,14 @@ canyonaxis_dic = {
 #*## DATA
 
 # iterate over each folder/filepath
-for filepath in filepathlist_ctd:
+for fp_ctd in filepathlist_ctd:
     
     # find serial of cast, extracted from arbitrary file in folder, here .a1 file
-    ctd_serial_temp = [f for f in os.listdir(filepath) if fnmatch.fnmatch(f, '*.a1')]
+    ctd_serial_temp = [f for f in os.listdir(fp_ctd) if fnmatch.fnmatch(f, '*.a1')]
     
     # read data
     ctd_aquadop_temp = load_aquadopp_data(
-        FilePath=filepath,
+        FilePath=fp_ctd,
         SensorID=ctd_serial_temp[0][:-3]
         )
     
@@ -544,7 +544,7 @@ for filepath in filepathlist_ctd:
         'mg/L')
     
     # find station name and assign either cast_1 or cast_2 indicator -> usually singlecast is cast_1 and yoyo is cast_2 (exceptions are Station1 and Station8; no yoyo casts done at Station1, no singlecasts done at Station8)
-    ctd_station_temp = filepath.split('\\')[-1].split('_')[1]
+    ctd_station_temp = fp_ctd.split('\\')[-1].split('_')[1]
     
     # calculate along & cross canyon velocities
     if ctd_station_temp in ['Station8']:
@@ -584,7 +584,7 @@ for filepath in filepathlist_ctd:
             )
     
     # assign cast indicators so that result is saved in the correct subdictionary
-    if filepath.split('\\')[-1].split('_')[2] in ['singlecast']:
+    if fp_ctd.split('\\')[-1].split('_')[2] in ['singlecast']:
         castindicator = 'cast_1'
     else:
         castindicator = 'cast_2' 
@@ -593,7 +593,11 @@ for filepath in filepathlist_ctd:
     aqdp_ctddata[ctd_station_temp][castindicator] = ctd_aquadop_temp 
 
 
-#%% ### LOAD OBS DATA - MOORINGS & BOBO ###
+#%% #*## LOAD OBS DATA - MOORINGS & BOBO ###
+'''-> Loads the obs data from the csv files for the moorings and the bottom lander
+-> Smoothing and outlier removal is included in the load data function
+-> data is also already converted to SPM'''
+
 
 #*## GENERAL PARAMETERS 
 
@@ -605,118 +609,180 @@ unreal_threshold = 50 # threshold for unrealistically high values
 
 #*## MOORING 1 
 
-fp_m1_obs = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS/Mooring_data/M1/'
+# filepath of obs data
+fp_m1_obs = os.path.join(fp_jfe, 'Mooring_data', 'M1')
+
+# serial numbers of obs sensors 
 serials_obs_m1 = np.array(['08','10','11','15'])
+
+# locations of obs sensors
 locs_obs_m1 =np.array(['1m_seabed','1m_aqdp','4m_aqdp','50m_topline']) 
 
-m1_obs = load_obs(fp_m1_obs,serials_obs_m1,locs_obs_m1, windowsize, std_threshold, unreal_threshold, linregress['alldata']['with_outliers'])
+# load obs data from csv files
+m1_obs = load_obs_data(
+    FilePath=fp_m1_obs,
+    SerialList=serials_obs_m1,
+    LocationList=locs_obs_m1,
+    WindowSize=windowsize,
+    StdThreshold=std_threshold,
+    UnrealThreshold=unreal_threshold,
+    LinearRegressModel=TurbRegressData['alldata']['with_outliers']
+    )
 
 
 #*## MOORING 2 ###
 
-fp_m2_obs = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS/Mooring_data/M2/'
+# filepath of obs data
+fp_m2_obs = os.path.join(fp_jfe, 'Mooring_data', 'M2')
+
+# serial numbers of obs sensors
 serials_obs_m2 = np.array(['16','17','18','19'])
+
+# locations of obs sensors
 locs_obs_m2 =np.array(['1m_seabed','1m_aqdp','4m_aqdp','50m_topline']) 
 
-m2_obs = load_obs(fp_m2_obs,serials_obs_m2,locs_obs_m2, windowsize, std_threshold, unreal_threshold, linregress['alldata']['with_outliers'])
+# load obs data from csv files
+m2_obs = load_obs_data(
+    FilePath=fp_m2_obs,
+    SerialList=serials_obs_m2,
+    LocationList=locs_obs_m2,
+    WindowSize=windowsize,
+    StdThreshold=std_threshold,
+    UnrealThreshold=unreal_threshold,
+    LinearRegressModel=TurbRegressData['alldata']['with_outliers']
+    )
 
 #*## MOORING 3 ###
 
-fp_m3_obs = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS/Mooring_data/M3/'
+# filepath of obs data
+fp_m3_obs = os.path.join(fp_jfe, 'Mooring_data', 'M3')
+
+# serial numbers of obs sensors
 serials_obs_m3 = np.array(['20','21','25','26'])
+
+# locations of obs sensors
 locs_obs_m3 =np.array(['1m_seabed','1m_aqdp','4m_aqdp','50m_topline']) 
 
-m3_obs = load_obs(fp_m3_obs,serials_obs_m3,locs_obs_m3, windowsize, std_threshold, unreal_threshold, linregress['alldata']['with_outliers'])
+# load obs data from csv files 
+m3_obs = load_obs_data(
+    FilePath=fp_m3_obs,
+    SerialList=serials_obs_m3,
+    LocationList=locs_obs_m3,
+    WindowSize=windowsize,
+    StdThreshold=std_threshold,
+    UnrealThreshold=unreal_threshold,
+    LinearRegressModel=TurbRegressData['alldata']['with_outliers']
+    )
 
+#*## BOBO LANDER ###
 
-### BOBO LANDER ###
+# read obs data
+obsdata_bobo = pd.read_csv(
+    fp_jfe + '/BoBo_data/20230912_0800_ATUD-USB_0027_062324_P.csv',
+    header=[55]
+    )
 
-obsdata_bobo = pd.read_csv(fp_jfe + '/BoBo_data/20230912_0800_ATUD-USB_0027_062324_P.csv', header=[55])
+# set datetime index
 obsdata_bobo = obsdata_bobo.set_index(pd.to_datetime(obsdata_bobo['Meas date']), drop=True)
-bobo_obs = {'turb_1mab': (obsdata_bobo['Turb.-M[FTU]'], 'FTU'), 
-       'temp_1mab': (obsdata_bobo['Temp.[degC]'], 'degC'), 
-       'SPM_1mab': convert_turbidity2SPM(obsdata_bobo['Turb.-M[FTU]'], linregress['alldata']['with_outliers'])}
+
+# create obs dictionary
+bobo_obs = {
+    'turb_1mab': (obsdata_bobo['Turb.-M[FTU]'], 'FTU'), 
+    'temp_1mab': (obsdata_bobo['Temp.[degC]'], 'degC'), 
+    'SPM_1mab': opticalbackscatter_to_spm(
+        DataSeries=obsdata_bobo['Turb.-M[FTU]'],
+        LinRegressModel=TurbRegressData['alldata']['with_outliers']
+        )
+    }
 
 
+#%% #*## MICROCAT DATA - MOORING 3 ### 
+'''-> loads the microcat data for mooring 3
+-> calculates additional variables such as sea pressure, practical salinity, absolute salinity, conservative temperature and density'''
 
-#%% ### MICROCAT DATA ### 
 
-### Mooring 3 ###
+# filepath 
+fp_ctd = os.path.join(ParentDirectory, 'Data', 'MicroCat', 'Mooring 3')
 
-# filepath and serial id
-filepath = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/CTD_microcat/Mooring 3/'
-serialid = 'SN2656'
+# instrument id
+id_mc_m3 = 'SN2656'
 
-# read data
-m3_microcat = pd.read_csv(filepath + f'MC_{serialid}.asc',
-                    header=None,
-                    skiprows=56,
-                    delimiter=',',
-                    names=['temp. [degC]', 'cond. [S/m]', 'pressure [dbar]', "Date", "Hour"],
-                    )
+# read data from asc file
+m3_mc = pd.read_csv(
+    fp_ctd + f'\\MC_{id_mc_m3}.asc',
+    header=None,
+    skiprows=56,
+    delimiter=',',
+    names=['temp. [degC]', 'cond. [S/m]', 'pressure [dbar]', "Date", "Hour"],
+    )
 
 # set and manipulate time index
-m3_microcat.set_index(pd.to_datetime(m3_microcat['Date'] + ' ' + m3_microcat['Hour']), drop=True, inplace=True)
-m3_microcat.drop(columns=['Date', 'Hour'], inplace=True)
+m3_mc.set_index(
+    pd.to_datetime(m3_mc['Date'] + ' ' + m3_mc['Hour']),
+    drop=True,
+    inplace=True
+    )
+m3_mc.drop(
+    columns=['Date', 'Hour'],
+    inplace=True
+    )
 
 # conversion of conductivity from S/m to mS/cm
-m3_microcat['cond. [mS/cm]'] = m3_microcat['cond. [S/m]'] * 10
+m3_mc['cond. [mS/cm]'] = m3_mc['cond. [S/m]'] * 10
 
 # calculate sea pressure
-m3_microcat['sea pressure [dbar]'] = m3_microcat['pressure [dbar]'] - 10.1325
+m3_mc['sea pressure [dbar]'] = m3_mc['pressure [dbar]'] - 10.1325
 
 # calculate practical salinity 
-m3_microcat['SP [unitless]'] = SP_from_C(m3_microcat['cond. [mS/cm]'], m3_microcat['temp. [degC]'], m3_microcat['sea pressure [dbar]'])
+m3_mc['SP [unitless]'] = SP_from_C(
+    m3_mc['cond. [mS/cm]'],
+    m3_mc['temp. [degC]'],
+    m3_mc['sea pressure [dbar]']
+    )
 
 # calculate absolute salinity
-m3_microcat['SA [g/kg]'] = SA_from_SP(m3_microcat['SP [unitless]'], m3_microcat['sea pressure [dbar]'], m3_general['longitude'], m3_general['latitude'])
+m3_mc['SA [g/kg]'] = SA_from_SP(
+    m3_mc['SP [unitless]'],
+    m3_mc['sea pressure [dbar]'],
+    m3_general['longitude'],
+    m3_general['latitude']
+    )
 
 # calulcate conservative temperature
-m3_microcat['CT [degC]'] = CT_from_t(m3_microcat['SA [g/kg]'], m3_microcat['temp. [degC]'], m3_microcat['sea pressure [dbar]'])
+m3_mc['CT [degC]'] = CT_from_t(
+    m3_mc['SA [g/kg]'],
+    m3_mc['temp. [degC]'],
+    m3_mc['sea pressure [dbar]']
+    )
 
 # calculate density 
-m3_microcat['density [kg/m^3]'] = density.rho(m3_microcat['SA [g/kg]'], m3_microcat['CT [degC]'], m3_microcat['sea pressure [dbar]'])
+m3_mc['density [kg/m^3]'] = density.rho(
+    m3_mc['SA [g/kg]'],
+    m3_mc['CT [degC]'],
+    m3_mc['sea pressure [dbar]']
+    )
 
-# calculate buyoancy frequency
+#%% ### CTD - GENERAL DATA ###
+'''-> creates general information dictionaries of each of the ctd casts with information such as their position, depth, begin, end and bottom times
+-> due to input error in shipsdata, yoyo cast at 800m is split into two different files'''
 
+#TODO: Combine yoyo 1 (500m) into one dictionary
 
-
-
-
-#%% ### CTD DATA ###
-
-
-### GENERAL PARAMETERS ###
-
-# save location of CTD data, filenames, column names
-filepath = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/CTD/Processed/Binavg_1Hz/'
-filenames = glob.glob(filepath + '*.cnv')
-columnnames = ['scan count', 'pressure', 'temperature', 'conductivity', 'oxygen', 'time [s]', 'beam transmission', 'spar/linear', 'par/logarithmic', 'fluorescence', 'turbidity', 'fluorescence_afl', 'salinity', 'potential temperature', 'density_t', 'depth', 'altimeter', 'density_theta', 'depth_atlatitude', 'potential temperature 2', 'salinity 2', 'descent rate', 'flag']
-
-# save location of aquadop data
-filepath_aquadop = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/CTD_data/'
-
-
-
-
-
-### SINGLE CASTS ###
-
-#TODO: Where is the data for singlecast station 6?
+#*## Single Casts
 
 # dictionary names for single casts
-dicnames_sc = ['sc_4000', 'sc_3500', 'sc_3000', 'sc_2500', 'sc_2000', 'sc_1500', 'sc_1000']
+dicnames_ctd_sc = ['sc_4000', 'sc_3500', 'sc_3000', 'sc_2500', 'sc_2000', 'sc_1500', 'sc_1000']
 
 # SC 1_1: 4000m
 sc_4000 = {
-    'begin': datetime(2023, 9, 10, 11, 19),
-    'bottom': datetime(2023,9,10,13,2),
-    'end': datetime(2023,9,10,14,14),
+    'begin': datetime(2023, 9, 10, 11, 19),  # taken from shipsdata
+    'bottom': datetime(2023,9,10,13,2),  # from shipsdata
+    'end': datetime(2023,9,10,14,14),  # from shipsdata
     'latitude': 44.3987, # based on first bottom reading
     'longitude': 3.7152, # based on first bottom reading
-    'depth_ea600': 3982.1,
-    'depth_ea302': 3985.6, 
-    'serial': '01CTD01', 
+    'depth_ea600': 3982.1,  # based on first bottom reading
+    'depth_ea302': 3985.6, # based on first bottom reading
+    'serial': '01CTD01', # from cruise report
     'distance_thalweg': 411.416,  # distance from beginning of thalweg [km]
     'distance_M1': 411.416 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '1_1', # cast id from shipsdata
@@ -724,14 +790,14 @@ sc_4000 = {
 
 # # SC 1_2: 4000m
 # sc_4000_2 = {
-#     'begin': datetime(2023, 9, 15, 8, 27),
-#     'bottom': datetime(2023, 9, 15, 9, 52),
-#     'end': datetime(2023, 9, 15, 11, 22),
+#     'begin': datetime(2023, 9, 15, 8, 27),  # from shipsdata
+#     'bottom': datetime(2023, 9, 15, 9, 52),  # from shipsdata
+#     'end': datetime(2023, 9, 15, 11, 22),  # from shipsdata
 #     'latitude': 44.3997, # based on first bottom reading
 #     'longitude': 3.7153, # based on first bottom reading
-#     'depth_ea600': 3980.9,
-#     'depth_ea302': 4010.59, 
-#     'serial': '16CTD01',
+#     'depth_ea600': 3980.9,  # based on first bottom reading
+#     'depth_ea302': 4010.59, # based on first bottom reading
+#     'serial': '16CTD01',  # from cruise report
 #     'distance_thalweg': 411.416,  # distance from beginning of thalweg [km]
 #     'distance_M1': 411.416 - 2.642,  # distance to 500m station / M1 [km]
 #     'cast_id': '16_1', # cast id from shipsdata
@@ -739,14 +805,14 @@ sc_4000 = {
 
 # SC 2: 3500m
 sc_3500 = {
-    'begin': datetime(2023, 9, 10, 18, 3),
-    'bottom': datetime(2023, 9, 10, 19, 12),
-    'end': datetime(2023, 9, 10, 20, 35),
+    'begin': datetime(2023, 9, 10, 18, 3),  # from shipsdata
+    'bottom': datetime(2023, 9, 10, 19, 12),  # from shipsdata
+    'end': datetime(2023, 9, 10, 20, 35),  # from shipsdata
     'latitude': 43.8587, # based on first bottom reading
     'longitude': 3.6342, # based on first bottom reading
-    'depth_ea600': 3463.6,
-    'depth_ea302': 3495.05,
-    'serial': '02CTD01',
+    'depth_ea600': 3463.6,  # based on first bottom reading
+    'depth_ea302': 3495.05,  # based on first bottom reading
+    'serial': '02CTD01',  # from cruise report
     'distance_thalweg': 307.465,  # distance from beginning of thalweg [km]
     'distance_M1': 307.465 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '2_1',  # cast id from shipsdata
@@ -754,14 +820,14 @@ sc_3500 = {
 
 # SC 3: 3000m
 sc_3000 = {
-    'begin': datetime(2023, 9, 10, 23, 19),
-    'bottom': datetime(2023, 9, 11, 0, 11),
-    'end': datetime(2023, 9, 11, 1, 21),
+    'begin': datetime(2023, 9, 10, 23, 19),  # from shipsdata
+    'bottom': datetime(2023, 9, 11, 0, 11),  # from shipsdata
+    'end': datetime(2023, 9, 11, 1, 21),  # from shipsdata
     'latitude': 43.7897, # based on first bottom reading
     'longitude': 3.1213, # based on first bottom reading
-    'depth_ea600': 2984.9,
-    'depth_ea302': 3009.52,
-    'serial': '03CTD01',
+    'depth_ea600': 2984.9,  # based on first bottom reading
+    'depth_ea302': 3009.52,  # based on first bottom reading
+    'serial': '03CTD01',  # from cruise report
     'distance_thalweg': 226.636,  # distance from beginning of thalweg [km]
     'distance_M1': 226.636 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '3_1',  # cast id from shipsdata
@@ -769,14 +835,14 @@ sc_3000 = {
 
 # SC 4: 2500m
 sc_2500 = {
-    'begin': datetime(2023, 9, 11, 3, 22),
-    'bottom': datetime(2023, 9, 11, 4, 10),
-    'end': datetime(2023, 9, 11, 5, 13),
+    'begin': datetime(2023, 9, 11, 3, 22),  # from shipsdata
+    'bottom': datetime(2023, 9, 11, 4, 10),  # from shipsdata
+    'end': datetime(2023, 9, 11, 5, 13),  # from shipsdata
     'latitude': 43.7575, # based on first bottom reading
     'longitude': 2.7792, # based on first bottom reading
-    'depth_ea600': 2567.1, # NOT FROM FIRST BOTTOM BUT FROM TOP READING
-    'depth_ea302': 2595.06,
-    'serial': '04CTD01',
+    'depth_ea600': 2567.1, # based on first bottom reading
+    'depth_ea302': 2595.06,  # based on first bottom reading
+    'serial': '04CTD01',  # from cruise report
     'distance_thalweg': 175.232,  # distance from beginning of thalweg [km]
     'distance_M1': 175.232 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '4_1',  # cast id from shipsdata
@@ -784,14 +850,14 @@ sc_2500 = {
 
 # SC 5: 2000m
 sc_2000 = {
-    'begin': datetime(2023, 9, 11, 7, 54),   
-    'bottom': datetime(2023, 9, 11, 8, 28),
-    'end': datetime(2023, 9, 11, 9, 22),
+    'begin': datetime(2023, 9, 11, 7, 54),  # from shipsdata
+    'bottom': datetime(2023, 9, 11, 8, 28),  # from shipsdata
+    'end': datetime(2023, 9, 11, 9, 22),  # from shipsdata
     'latitude': 43.6635, # based on first bottom reading
     'longitude': 2.335, # based on first bottom reading
-    'depth_ea600': 1832.6,
-    'depth_ea302': 1862.62,
-    'serial': '05CTD01',
+    'depth_ea600': 1832.6,  # based on first bottom reading
+    'depth_ea302': 1862.62,  # based on first bottom reading
+    'serial': '05CTD01',  # from cruise report
     'distance_thalweg': 104.951,  # distance from beginning of thalweg [km]
     'distance_M1': 104.951 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '5_1',  # cast id from shipsdata
@@ -799,14 +865,14 @@ sc_2000 = {
 
 #SC 6: 1500m
 sc_1500 = {
-    'begin': datetime(2023, 9, 11, 10, 39),
-    'bottom': datetime(2023, 9, 11, 11, 12),
-    'end': datetime(2023, 9, 11, 11, 53),
+    'begin': datetime(2023, 9, 11, 10, 39),  # from shipsdata
+    'bottom': datetime(2023, 9, 11, 11, 12),  # from shipsdata
+    'end': datetime(2023, 9, 11, 11, 53),  # from shipsdata
     'latitude': 43.6378, # based on first bottom reading
     'longitude': 2.1278, # based on first bottom reading
-    'depth_ea600': 1467.9, # NOT FROM FIRST BOTTOM BUT FROM TOP READING
-    'depth_ea302': 1491.34,
-    'serial': '06CTD01',
+    'depth_ea600': 1467.9, # based on first bottom reading
+    'depth_ea302': 1491.34,  # based on first bottom reading
+    'serial': '06CTD01',  # from cruise report
     'distance_thalweg': 76.901,  # distance from beginning of thalweg [km]
     'distance_M1': 76.901 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '6_1',  # cast id from shipsdata
@@ -814,19 +880,145 @@ sc_1500 = {
 
 # SC 7: 1000m
 sc_1000 = {
-    'begin': datetime(2023, 9, 11, 13, 13),
-    'bottom': datetime(2023, 9, 11, 13, 41),
-    'end': datetime(2023, 9, 11, 14, 10),
+    'begin': datetime(2023, 9, 11, 13, 13),  # from shipsdata
+    'bottom': datetime(2023, 9, 11, 13, 41),  # from shipsdata
+    'end': datetime(2023, 9, 11, 14, 10),  # from shipsdata
     'latitude': 43.6077, # based on first bottom reading
     'longitude': 1.8975, # based on first bottom reading
-    'depth_ea600': 1011.4,
-    'depth_ea302': 1043.24,
-    'serial': '07CTD01',
+    'depth_ea600': 1011.4,  # based on first bottom reading
+    'depth_ea302': 1043.24,  # based on first bottom reading
+    'serial': '07CTD01',  # from cruise report
     'distance_thalweg': 40.052,  # distance from beginning of thalweg [km]
     'distance_M1': 40.052 - 2.642,  # distance to 500m station / M1 [km]
     'cast_id': '7_1',  # cast id from shipsdata
 }
 
+#*## Yoyo Casts
+
+# YOYO 8_1: 500m
+yoyo_500_1 = {
+    'begin': datetime(2023, 9, 11, 16, 47),  # from shipsdata
+    'end': datetime(2023, 9, 12, 3, 40),  # from shipsdata
+    'latitude': 43.6492, # based on first bottom reading
+    'longitude': 1.6568, # based on first bottom reading
+    'depth_ea600': 552.34,  # based on first bottom reading 
+    'depth_ea302': 561.27,  # based on first bottom reading
+    'serial': '08CTD01', # from cruise report
+    'serial_adcp': 'YOY8UP09',  # from cruise report
+    'distance_thalweg': 2.642, # distance to beginning of thalweg profile [km]
+    'distance_M1': 0, # distance to 500m station / M1 [km]
+    'cast_id': '8_1',  # cast id from shipsdata
+}
+
+# YOYO 8_2: 500m
+yoyo_500_2 = {
+    'begin': datetime(2023, 9, 12, 4, 1),  # from shipsdata
+    'end': datetime(2023, 9, 12, 7, 7),  # from shipsdata
+    'latitude': 43.6492, # based on first bottom reading
+    'longitude': 1.6563, # based on first bottom reading
+    'depth_ea600': 552.64,  # based on first bottom reading
+    'depth_ea302': 562.52,  # based on first bottom reading
+    'serial': '08CTD02',  # from cruise report
+    'distance_thalweg': 2.642,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 0, # distance to 500m station / M1 [km]
+    'cast_id': '8_2',  # cast id from shipsdata
+}
+
+
+# YOYO 14: 1000m
+yoyo_1000 = {
+    'begin': datetime(2023, 9, 13, 3, 15),  # from shipsdata
+    'end': datetime(2023, 9, 13, 17, 33),  # from shipsdata
+    'latitude': 43.6042, # based on first bottom reading
+    'longitude': 1.9012, # based on first bottom reading
+    'depth_ea600': 1030.6,  # based on first bottom reading
+    'depth_ea302': 1049.82,  # based on first bottom reading
+    'serial': '14CTD01',   # from cruise report
+    'serial_adcp': 'YOY7UP10',  # from cruise report
+    'distance_thalweg': 40.567,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 40.567 - 2.642, # distance to 500m station / M1 [km]
+    'cast_id': '14_1',  # cast id from shipsdata
+}
+
+# YOYO 15: 1500m
+yoyo_1500 = {
+    'begin': datetime(2023, 9, 13, 22, 18),  # from shipsdata
+    'end': datetime(2023, 9, 14, 12, 50),  # from shipsdata
+    'latitude': 43.6347, # based on first bottom reading
+    'longitude': 2.1237, # based on first bottom reading
+    'depth_ea600': 1447,  # based on first bottom reading
+    'depth_ea302': 1485.31,  # based on first bottom reading
+    'serial': '15CTD01',  # from cruise report
+    'serial_adcp': 'YOY6UP11',   # from cruise report
+    'distance_thalweg': 76.292,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 76.292 - 2.642, # distance to 500m station / M1 [km]
+    'cast_id': '15_1',  # cast id from shipsdata
+}
+
+# YOYO 17: 3500m
+yoyo_3500 = {
+    'begin': datetime(2023, 9, 15, 19, 20), # from shipsdata
+    'end': datetime(2023, 9, 16, 10, 29),  # from shipsdata
+    'latitude': 43.8587, # based on first bottom reading
+    'longitude': 3.634, # based on first bottom reading
+    'depth_ea600': 3396.2,  # based on first bottom reading
+    'depth_ea302': 3494.68,  # based on first bottom reading
+    'serial': '17CTD01',   # from cruise report
+    'serial_adcp': 'YOY2UP13',  # from cruise report
+    'distance_thalweg': 307.487,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 307.487 - 2.642, # distance to 500m station / M1 [km]
+    'cast_id': '17_1',  # cast id from shipsdata
+}
+
+# YOYO 18: 3000m
+yoyo_3000 = {
+    'begin': datetime(2023, 9, 16, 19, 30),  # from shipsdata
+    'end': datetime(2023, 9, 17, 10, 50),  # from shipsdata
+    'latitude': 43.7895, # based on first bottom reading
+    'longitude': 3.1187, # based on first bottom reading
+    'depth_ea600': 2980.3, # NOT BASED ON FIRST BOTTOM BUT ON SECOND BOTTOM READING
+    'depth_ea302': 3006.51, # NOT BASED ON FIRST BOTTOM BUT ON SECOND BOTTOM READING
+    'serial': '18CTD01',  # from cruise report
+    'serial_adcp': 'YOY3UP14',  #from cruise report
+    'distance_thalweg': 226.683,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 226.683 - 2.642, # distance to 500m station / M1 [km]
+    'cast_id': '18_1',  # cast id from shipsdata
+}
+
+# YOYO 19: 2500m
+yoyo_2500 = {
+    'begin': datetime(2023, 9, 17, 18, 42), # from shipsdata
+    'end': datetime(2023, 9, 18, 10, 31),  # from shipsdata
+    'latitude': 43.7562, # based on first bottom reading
+    'longitude': 2.7733, # based on first bottom reading
+    'depth_ea600': 2557.5, # NOT BASED ON FIRST BOTTOM BUT ON THIRD BOTTOM READING
+    'depth_ea302': 2585.57, # NOT BASED ON FIRST BOTTOM BUT ON THIRD BOTTOM READING
+    'serial': '19CTD01',  # from cruise report
+    'serial_adcp': 'YOY4UP15', # from cruise report
+    'distance_thalweg': 174.649,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 174.649 - 2.642, # distance to 500m station / M1 [km]
+    'cast_id': '19_1',  # cast id from shipsdata
+}
+
+# YOYO 21: 2000m
+yoyo_2000 = {
+    'begin': datetime(2023, 9, 18, 19, 13),  # from shipsdata
+    'end': datetime(2023, 9, 19, 7, 54),  # from shipsdata
+    'latitude': 43.664, # based on first bottom reading
+    'longitude': 2.3345, # based on first bottom reading
+    'depth_ea600': 1861.2,  # based on first bottom reading
+    'depth_ea302': 1861.75,  # based on first bottom reading
+    'serial': '21CTD01', # from cruise report
+    'serial_adcp': 'YOY5UP02',  # from cruise report
+    'distance_thalweg': 104.931,  # distance to beginning of thalweg profile [km]
+    'distance_M1': 104.931 - 2.642, # distance to 500m station / M1 [km]
+    'cast_id': '21_1',  # cast id from shipsdata
+}
+
+
+#%%
+# dictionary names for single casts
+dicnames_yoyo = ['yoyo_500_1', 'yoyo_500_2', 'yoyo_1000', 'yoyo_1500', 'yoyo_3500', 'yoyo_3000', 'yoyo_2500', 'yoyo_2000' ]
 
 # list for general properties defined above
 scs = [sc_4000, sc_3500, sc_3000, sc_2500, sc_2000, sc_1500, sc_1000]
@@ -841,137 +1033,6 @@ for sc in scs:
 ctddata_sc = {}
 
 
-### YOYO CASTS ###
-
-# dictionary names for single casts
-dicnames_yoyo = ['yoyo_500_1', 'yoyo_500_2', 'yoyo_1000', 'yoyo_1500', 'yoyo_3500', 'yoyo_3000', 'yoyo_2500', 'yoyo_2000' ]
-
-
-
-# YOYO 8_1: 500m
-yoyo_500_1 = {
-    'begin': datetime(2023, 9, 11, 16, 47),
-    'end': datetime(2023, 9, 12, 3, 40),
-    'latitude': 43.6492, # based on first bottom reading
-    'longitude': 1.6568, # based on first bottom reading
-    'depth_ea600': 552.34,
-    'depth_ea302': 561.27,
-    'serial': '08CTD01',
-    'serial_adcp': 'YOY8UP09',
-    'distance_thalweg': 2.642, # distance to beginning of thalweg profile [km]
-    'distance_M1': 0, # distance to 500m station / M1 [km]
-    'cast_id': '8_1',  # cast id from shipsdata
-}
-
-# YOYO 8_2: 500m
-yoyo_500_2 = {
-    'begin': datetime(2023, 9, 12, 4, 1),
-    'end': datetime(2023, 9, 12, 7, 7),
-    'latitude': 43.6492, # based on first bottom reading
-    'longitude': 1.6563, # based on first bottom reading
-    'depth_ea600': 552.64,
-    'depth_ea302': 562.52,
-    'serial': '08CTD02',
-    'distance_thalweg': 2.642,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 0, # distance to 500m station / M1 [km]
-    'cast_id': '8_2',  # cast id from shipsdata
-}
-
-
-# YOYO 14: 1000m
-yoyo_1000 = {
-    'begin': datetime(2023, 9, 13, 3, 15),
-    'end': datetime(2023, 9, 13, 17, 33),
-    'latitude': 43.6042, # based on first bottom reading
-    'longitude': 1.9012, # based on first bottom reading
-    'depth_ea600': 1030.6,
-    'depth_ea302': 1049.82,
-    'serial': '14CTD01', 
-    'serial_adcp': 'YOY7UP10',
-    'distance_thalweg': 40.567,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 40.567 - 2.642, # distance to 500m station / M1 [km]
-    'cast_id': '14_1',  # cast id from shipsdata
-}
-
-# YOYO 15: 1500m
-yoyo_1500 = {
-    'begin': datetime(2023, 9, 13, 22, 18),
-    'end': datetime(2023, 9, 14, 12, 50),
-    'latitude': 43.6347, # based on first bottom reading
-    'longitude': 2.1237, # based on first bottom reading
-    'depth_ea600': 1447,
-    'depth_ea302': 1485.31,
-    'serial': '15CTD01', 
-    'serial_adcp': 'YOY6UP11', 
-    'distance_thalweg': 76.292,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 76.292 - 2.642, # distance to 500m station / M1 [km]
-    'cast_id': '15_1',  # cast id from shipsdata
-}
-
-# YOYO 17: 3500m
-yoyo_3500 = {
-    'begin': datetime(2023, 9, 15, 19, 20), 
-    'end': datetime(2023, 9, 16, 10, 29),
-    'latitude': 43.8587, # based on first bottom reading
-    'longitude': 3.634, # based on first bottom reading
-    'depth_ea600': 3396.2,
-    'depth_ea302': 3494.68,
-    'serial': '17CTD01', 
-    'serial_adcp': 'YOY2UP13', 
-    'distance_thalweg': 307.487,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 307.487 - 2.642, # distance to 500m station / M1 [km]
-    'cast_id': '17_1',  # cast id from shipsdata
-}
-
-# YOYO 18: 3000m
-yoyo_3000 = {
-    'begin': datetime(2023, 9, 16, 19, 30),
-    'end': datetime(2023, 9, 17, 10, 50),
-    'latitude': 43.7895, # based on first bottom reading
-    'longitude': 3.1187, # based on first bottom reading
-    'depth_ea600': 2980.3, # NOT BASED ON FIRST BOTTOM BUT ON SECOND BOTTOM READING
-    'depth_ea302': 3006.51, # NOT BASED ON FIRST BOTTOM BUT ON SECOND BOTTOM READING
-    'serial': '18CTD01', 
-    'serial_adcp': 'YOY3UP14', 
-    'distance_thalweg': 226.683,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 226.683 - 2.642, # distance to 500m station / M1 [km]
-    'cast_id': '18_1',  # cast id from shipsdata
-}
-
-# YOYO 19: 2500m
-yoyo_2500 = {
-    'begin': datetime(2023, 9, 17, 18, 42), 
-    'end': datetime(2023, 9, 18, 10, 31),
-    'latitude': 43.7562, # based on first bottom reading
-    'longitude': 2.7733, # based on first bottom reading
-    'depth_ea600': 2557.5, # NOT BASED ON FIRST BOTTOM BUT ON THIRD BOTTOM READING
-    'depth_ea302': 2585.57, # NOT BASED ON FIRST BOTTOM BUT ON THIRD BOTTOM READING
-    'serial': '19CTD01', 
-    'serial_adcp': 'YOY4UP15', 
-    'distance_thalweg': 174.649,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 174.649 - 2.642, # distance to 500m station / M1 [km]
-    'cast_id': '19_1',  # cast id from shipsdata
-}
-
-# YOYO 21: 2000m
-yoyo_2000 = {
-    'begin': datetime(2023, 9, 18, 19, 13),  
-    'end': datetime(2023, 9, 19, 7, 54),
-    'latitude': 43.664, # based on first bottom reading
-    'longitude': 2.3345, # based on first bottom reading
-    'depth_ea600': 1861.2,
-    'depth_ea302': 1861.75,
-    'serial': '21CTD01', 
-    'serial_adcp': 'YOY5UP02', 
-    'distance_thalweg': 104.931,  # distance to beginning of thalweg profile [km]
-    'distance_M1': 104.931 - 2.642, # distance to 500m station / M1 [km]
-    'cast_id': '21_1',  # cast id from shipsdata
-}
-
-
-
-
-
 # list for general properties defined above
 yoyos = [yoyo_500_1, yoyo_500_2, yoyo_1000, yoyo_1500, yoyo_3500, yoyo_3000, yoyo_2500, yoyo_2000]
 
@@ -980,9 +1041,22 @@ serials_yoyo = []
 for yoyo in yoyos:
     serials_yoyo.append(yoyo['serial'])
 
+#%% ### CTD - READ DATA ###
 
 
-# TODO: combine ctd no. 8_1 and 8_2 into one array (both correspond to the 500m yoyo)
+
+
+# save location of CTD data, filenames, column names
+fp_ctd = os.path.join(ParentDirectory, 'Data', 'CTD', 'Processed', 'Binavg_1Hz')
+fp_ctd_aquadopp = os.path.join(ParentDirectory, 'Data', 'Nortek_Aquadopp', 'CTD_data')
+fp_ctd = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/CTD/Processed/Binavg_1Hz/'
+fp_ctd_aquadopp = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Nortek_Aquadopp/CTD_data/'
+
+
+filenames_ctd = glob.glob(fp_ctd + '*.cnv')
+columns_ctd = ['scan count', 'pressure', 'temperature', 'conductivity', 'oxygen', 'time [s]', 'beam transmission', 'spar/linear', 'par/logarithmic', 'fluorescence', 'turbidity', 'fluorescence_afl', 'salinity', 'potential temperature', 'density_t', 'depth', 'altimeter', 'density_theta', 'depth_atlatitude', 'potential temperature 2', 'salinity 2', 'descent rate', 'flag']
+
+
 
 # dictionary for yoyo cast data
 ctddata_yoyo = {}
@@ -990,7 +1064,7 @@ ctddata_yoyo = {}
 
 ### READING DATA ###
 
-for filename in filenames:
+for filename in filenames_ctd:
     
     # read out serials from filename 
     serial = filename.split('-')[-1].split('.')[0]
@@ -1020,7 +1094,7 @@ for filename in filenames:
                        header=None,
                        delim_whitespace=True,
                        encoding='ISO-8859-1', 
-                       names=columnnames)
+                       names=columns_ctd)
     
     # create time index for data
     time = pd.date_range(start=starttime, periods=len(data['time [s]']), freq='S')
@@ -1053,7 +1127,7 @@ for filename in filenames:
     data_despiked['SP'] = SP_from_C(data_despiked['conductivity']*10, data_despiked['temperature'], data_despiked['sea pressure'])
     
     if serial in serials_sc:
-        name = dicnames_sc[serials_sc.index(serial)]
+        name = dicnames_ctd_sc[serials_sc.index(serial)]
         generalinfo = scs[serials_sc.index(serial)]
         ctddata_sc[name] = data
         ctddata_sc[f'{name}_general'] = generalinfo
@@ -1174,7 +1248,7 @@ elevation['slope_fitted'] = np.gradient(elevation['Elevation_fitted'], elevation
 
 ### GENERAL PARAMETERS ### 
 
-filepath = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS/CTD_data/data_processed/'  # general filepath
+fp_ctd = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/JFE_OBS/CTD_data/data_processed/'  # general filepath
 windowsize = 60 # window size for rolling mean [s]
 std_threshold = 3 # threshold for standard deviation of rolling mean
 unreal_threshold = 50 # threshold for unrealistically high values
@@ -1189,10 +1263,10 @@ jfe_dict_sc = {cast: None for cast in sclist} # create results array with a key 
 for cast in allcastslist:
     
     # temporary file cast that moves into folder corresponding to cast
-    filepath_temp = f'{filepath}{cast}/' 
+    filepath_temp = f'{fp_ctd}{cast}/' 
 
     # retrieve paths of all csv files within this folder
-    filenames =glob.glob(filepath_temp + "*.csv")
+    filenames_ctd =glob.glob(filepath_temp + "*.csv")
         
     # save each df according to its position
     if cast in ['1_1', '2_1', '3_1', '4_1', '5_1', '6_1', '7_1']:
@@ -1204,7 +1278,7 @@ for cast in allcastslist:
         df_list =[]
         
         # data processing of csv file, taken from load_obs function
-        for file in filenames:
+        for file in filenames_ctd:
             df = pd.read_csv(file, index_col=[0], parse_dates=True)
             df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=windowsize).mean()
             df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=windowsize).std()
@@ -1213,7 +1287,7 @@ for cast in allcastslist:
             df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan # replace outliers with NaN
             df.loc[df['Turb.-M[FTU]_filtered'] > unreal_threshold, 'Turb.-M[FTU]_filtered'] = np.nan # replace unrealistically high values with NaN
             df = df.drop(columns=['Turb_rolling_mean', 'Turb_rolling_std', 'is_outlier'])
-            df['SPM[mg/L]'] = convert_turbidity2SPM(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
+            df['SPM[mg/L]'] = opticalbackscatter_to_spm(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
             df_list.append(df)
             
         # saving resulting dfs in list and then in dictionary
@@ -1231,7 +1305,7 @@ for cast in allcastslist:
         df_list =[]
         
         # data processing of csv file
-        for file in filenames:
+        for file in filenames_ctd:
             df = pd.read_csv(file, index_col=[0], parse_dates=True)
             df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=windowsize).mean()
             df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=windowsize).std()
@@ -1240,7 +1314,7 @@ for cast in allcastslist:
             df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan # replace outliers with NaN
             df.loc[df['Turb.-M[FTU]_filtered'] > unreal_threshold, 'Turb.-M[FTU]_filtered'] = np.nan # replace unrealistically high values with NaN
             df = df.drop(columns=['Turb_rolling_mean', 'Turb_rolling_std', 'is_outlier'])
-            df['SPM[mg/L]'] = convert_turbidity2SPM(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
+            df['SPM[mg/L]'] = opticalbackscatter_to_spm(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
             df_list.append(df)
             
         # saving resulting dfs in list and then in dictionary
@@ -1262,7 +1336,7 @@ for cast in allcastslist:
         df_list = []
         
         # data processing of csv file
-        for file in filenames:
+        for file in filenames_ctd:
             df = pd.read_csv(file, index_col=[0], parse_dates=True)
             df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=windowsize).mean()
             df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=windowsize).std()
@@ -1271,7 +1345,7 @@ for cast in allcastslist:
             df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan # replace outliers with NaN
             df.loc[df['Turb.-M[FTU]_filtered'] > unreal_threshold, 'Turb.-M[FTU]_filtered'] = np.nan # replace unrealistically high values with NaN
             df = df.drop(columns=['Turb_rolling_mean', 'Turb_rolling_std', 'is_outlier'])
-            df['SPM[mg/L]'] = convert_turbidity2SPM(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
+            df['SPM[mg/L]'] = opticalbackscatter_to_spm(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
             df_list.append(df)
             
         # saving resulting dfs in list and then in dictionary   
@@ -1287,7 +1361,7 @@ for cast in allcastslist:
         df_list = []
         
         # data processing of csv file
-        for file in filenames:
+        for file in filenames_ctd:
             df = pd.read_csv(file, index_col=[0], parse_dates=True)
             df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=windowsize).mean()
             df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=windowsize).std()
@@ -1296,7 +1370,7 @@ for cast in allcastslist:
             df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan # replace outliers with NaN
             df.loc[df['Turb.-M[FTU]_filtered'] > unreal_threshold, 'Turb.-M[FTU]_filtered'] = np.nan # replace unrealistically high values with NaN
             df = df.drop(columns=['Turb_rolling_mean', 'Turb_rolling_std', 'is_outlier'])
-            df['SPM[mg/L]'] = convert_turbidity2SPM(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
+            df['SPM[mg/L]'] = opticalbackscatter_to_spm(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
             df_list.append(df)
         
         # saving resulting dfs in list and then in dictionary 
@@ -1312,7 +1386,7 @@ for cast in allcastslist:
         df_list = []
         
         # data processing of csv file
-        for file in filenames:
+        for file in filenames_ctd:
             df = pd.read_csv(file, index_col=[0], parse_dates=True)
             df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=windowsize).mean()
             df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=windowsize).std()
@@ -1321,7 +1395,7 @@ for cast in allcastslist:
             df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan # replace outliers with NaN
             df.loc[df['Turb.-M[FTU]_filtered'] > unreal_threshold, 'Turb.-M[FTU]_filtered'] = np.nan # replace unrealistically high values with NaN
             df = df.drop(columns=['Turb_rolling_mean', 'Turb_rolling_std', 'is_outlier'])
-            df['SPM[mg/L]'] = convert_turbidity2SPM(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
+            df['SPM[mg/L]'] = opticalbackscatter_to_spm(df['Turb.-M[FTU]_filtered'], linregress['alldata']['with_outliers'])
             df_list.append(df)
             
         # saving resulting dfs in list and then in dictionary 
@@ -1334,11 +1408,11 @@ for cast in allcastslist:
 ### Mooring 3 ###
 
 # filepath and serial id
-filepath = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/CTD_microcat/Mooring 3/'
-serialid = 'SN2656'
+fp_ctd = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/CTD_microcat/Mooring 3/'
+id_mc_m3 = 'SN2656'
 
 # read data
-m3_microcat = pd.read_csv(filepath + f'MC_{serialid}.asc',
+m3_mc = pd.read_csv(fp_ctd + f'MC_{id_mc_m3}.asc',
                     header=None,
                     skiprows=56,
                     delimiter=',',
@@ -1346,26 +1420,26 @@ m3_microcat = pd.read_csv(filepath + f'MC_{serialid}.asc',
                     )
 
 # set and manipulate time index
-m3_microcat.set_index(pd.to_datetime(m3_microcat['Date'] + ' ' + m3_microcat['Hour']), drop=True, inplace=True)
-m3_microcat.drop(columns=['Date', 'Hour'], inplace=True)
+m3_mc.set_index(pd.to_datetime(m3_mc['Date'] + ' ' + m3_mc['Hour']), drop=True, inplace=True)
+m3_mc.drop(columns=['Date', 'Hour'], inplace=True)
 
 # conversion of conductivity from S/m to mS/cm
-m3_microcat['cond. [mS/cm]'] = m3_microcat['cond. [S/m]'] * 10
+m3_mc['cond. [mS/cm]'] = m3_mc['cond. [S/m]'] * 10
 
 # calculate sea pressure
-m3_microcat['sea pressure [dbar]'] = m3_microcat['pressure [dbar]'] - 10.1325
+m3_mc['sea pressure [dbar]'] = m3_mc['pressure [dbar]'] - 10.1325
 
 # calculate practical salinity 
-m3_microcat['SP [unitless]'] = SP_from_C(m3_microcat['cond. [mS/cm]'], m3_microcat['temp. [degC]'], m3_microcat['sea pressure [dbar]'])
+m3_mc['SP [unitless]'] = SP_from_C(m3_mc['cond. [mS/cm]'], m3_mc['temp. [degC]'], m3_mc['sea pressure [dbar]'])
 
 # calculate absolute salinity
-m3_microcat['SA [g/kg]'] = SA_from_SP(m3_microcat['SP [unitless]'], m3_microcat['sea pressure [dbar]'], m3_general['longitude'], m3_general['latitude'])
+m3_mc['SA [g/kg]'] = SA_from_SP(m3_mc['SP [unitless]'], m3_mc['sea pressure [dbar]'], m3_general['longitude'], m3_general['latitude'])
 
 # calulcate conservative temperature
-m3_microcat['CT [degC]'] = CT_from_t(m3_microcat['SA [g/kg]'], m3_microcat['temp. [degC]'], m3_microcat['sea pressure [dbar]'])
+m3_mc['CT [degC]'] = CT_from_t(m3_mc['SA [g/kg]'], m3_mc['temp. [degC]'], m3_mc['sea pressure [dbar]'])
 
 # calculate density 
-m3_microcat['density [kg/m^3]'] = density.rho(m3_microcat['SA [g/kg]'], m3_microcat['CT [degC]'], m3_microcat['sea pressure [dbar]'])
+m3_mc['density [kg/m^3]'] = density.rho(m3_mc['SA [g/kg]'], m3_mc['CT [degC]'], m3_mc['sea pressure [dbar]'])
 
 # calculate buyoancy frequency
 
@@ -1373,8 +1447,8 @@ m3_microcat['density [kg/m^3]'] = density.rho(m3_microcat['SA [g/kg]'], m3_micro
 #%% ### FILTER WEIGHT DATA ###
 
 # filepath of csv files
-filepath = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Filters/'
-filename =glob.glob(filepath + "*.csv")[0]
+fp_ctd = 'C:/Users/werne/Documents/UniUtrecht/MasterThesis/Filters/'
+filename =glob.glob(fp_ctd + "*.csv")[0]
 
 spm_df_full = pd.read_csv(filename, sep=';', header=[0], skiprows=[1])
 
@@ -1413,7 +1487,7 @@ m2data = {'aquadop': m2_aquadop,
 m3data = {'aquadop': m3_aquadop,
             'obs': m3_obs,
             'general': m3_general, 
-            'microcat': m3_microcat,
+            'microcat': m3_mc,
             }
 
 # ctddata = {'singlecasts': ctddata_sc,

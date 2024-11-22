@@ -149,21 +149,29 @@ def calculate_tilt(Pitch, Roll, InputInDegrees, OutputInDegrees):
 
     return tilt
 
-def convert_turbidity2SPM(turbiditydata, linregression):
+#*DONE
+def opticalbackscatter_to_spm(DataSeries, LinRegressModel):
     """
-    Convert turbidity data to Suspended Particulate Matter (SPM) data using a linear regression equation.
+    Converts optical backscatter data to suspended particulate matter (SPM) concentrations using a linear regression equation.
 
     Parameters:
-    - turbiditydata (pandas.Series): A pandas Series containing turbidity data.
-    - linregression (dict): A dictionary containing the slope ('m') and intercept ('c') of the linear regression equation.
+    - DataSeries (Series)   : A pandas Series containing the optical backscatter data.
+    - LinRegressModel(dict) : A dictionary containing the slope ('m') and intercept ('c') of the linear regression equation.
 
     Returns:
-    - spmdata_df (pandas.DataFrame): A pandas DataFrame containing the converted SPM data.
+    - spmdata_df (DataFrame): A pandas DataFrame containing the converted SPM data.
 
     """
+    
     import pandas as pd
-    spmdata = linregression['m'] * turbiditydata + linregression['c']
-    datetime_index = pd.to_datetime(turbiditydata.index)
+    
+    # convert optical backscatter data based on linear equation parameters of regression
+    spmdata = LinRegressModel['m'] * DataSeries + LinRegressModel['c']
+    
+    # create datetime index
+    datetime_index = pd.to_datetime(DataSeries.index)
+    
+    # create dataframe
     spmdata_df = pd.DataFrame(spmdata, index=datetime_index,)
 
     return spmdata_df
@@ -374,7 +382,7 @@ def h_boundary_cacchione(u0, h, r, z0, N, alpha, beta):
     
     return u_star*100
 
-#! EXCLUDE UNITS FROM DATAFRAME?
+#* DONE
 def load_aquadopp_data(FilePath, SensorID): 
     """Load Aquadop Data
 
@@ -461,69 +469,96 @@ def load_aquadopp_data(FilePath, SensorID):
 
     return dic
 
-def load_obs(filepath, seriallist, loclist, windowsize, stdthreshold, unreealthreshold, linregressmodel):
+#* DONE
+def load_obs_data(FilePath, SerialList, LocationList, WindowSize, StdThreshold, UnrealThreshold, LinearRegressModel):
     """Load observation data from CSV files.
 
-    This function loads observation data from CSV files located in the specified filepath.
-    It matches the serial numbers in the filenames with the provided seriallist and assigns
-    the corresponding locations from the loclist. The loaded data is returned as a dictionary
-    with keys representing the variables (turbidity, temperature, and time) and values as tuples
-    containing the data and their respective units.
+    This function loads observation data from CSV files located in the specified FilePath.
+    It matches the serial numbers in the filenames with the provided SerialList and assigns
+    the corresponding locations from the LocationList. The loaded data is returned as a dictionary with keys representing the variables (turbidity, temperature, and time) and values as tuples containing the data and their respective units.
 
     Args:
-        filepath (str): The path to the directory containing the CSV files.
-        seriallist (list): A list of serial numbers to match with the filenames.
-        loclist (list): A list of corresponding locations for the serial numbers.
+        FilePath (str)              : The path to the directory containing the CSV files.
+        SerialList (list)           : A list of serial numbers to match with the filenames.
+        LocationList (list)         : A list of corresponding locations for the serial numbers.
+        WindowSize (int)            : size of the rolling window for smoothing of the signal.
+        StdThreshold (int)          : standard deviation threshold for removal of outliers based on z-score method. 
+        UnrealThreshold (int)       : threshold above which values are considered to be "unreal" for the problem at hand.
+        LinearRegressModel (dict)   : result dictionary of a linear regression model on turbidity vs spm concentrations. Used to convert the given turbidity values to spm values.
 
     Returns:
         dict: A dictionary containing the loaded observation data.
-            - 'turb_{location}_raw': A tuple containing the raw turbidity data and its unit.
-            - 'turb_{location}': A tuple containing the filtered turbidity data and its unit.
-            - 'temp_{location}_raw': A tuple containing the raw temperature data and its unit.
-            - 'time_{location}': The timestamp data.
+            - 'turb_{location}_raw' : A tuple containing the raw turbidity data and its unit.
+            - 'turb_{location}'     : A tuple containing the filtered turbidity data and its unit.
+            - 'temp_{location}_raw' : A tuple containing the raw temperature data and its unit.
+            - 'time_{location}'     : The timestamp data.
 
     """
 
+    ### IMPORTS
     import glob
     import pandas as pd
     import numpy as np
     import re
 
-    filenames = glob.glob(filepath + "*.csv")
+    # retrieve file names to be imported
+    filenames = glob.glob(FilePath + "\\*.csv")
 
-    dic = {}
+    # initiate result dictionary
+    resultdic = {}
     for file in filenames:
         
-        df = pd.read_csv(file, header=[55])
-        df = df.set_index(pd.to_datetime(df["Meas date"]), drop=True)
+        # read data from csv, set datetime index
+        df = pd.read_csv(
+            file,
+            header=[55]
+            )
+        df = df.set_index(
+            pd.to_datetime(df["Meas date"]),
+            drop=True
+            )
         
+        # calculate rolling mean and std according to WindowSize
+        df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=WindowSize).mean()
+        df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=WindowSize).std()
         
-        df['Turb_rolling_mean'] = df['Turb.-M[FTU]'].rolling(window=windowsize).mean()
-        
-        df['Turb_rolling_std'] = df['Turb.-M[FTU]'].rolling(window=windowsize).std()
-        
-        df['is_outlier'] = (df['Turb.-M[FTU]'] > df['Turb_rolling_mean'] + stdthreshold*df['Turb_rolling_std']) | (df['Turb.-M[FTU]'] < df['Turb_rolling_mean'] - stdthreshold*df['Turb_rolling_std'])
-        
+        # create new column for filtered turbidity data
         df['Turb.-M[FTU]_filtered'] = df['Turb.-M[FTU]']
         
-        df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan # replace outliers with NaN
-        df.loc[df['Turb.-M[FTU]_filtered'] > unreealthreshold, 'Turb.-M[FTU]_filtered'] = np.nan # replace unrealistically high values with NaN
+        # flag outliers based on StdThreshold
+        df['is_outlier'] = (df['Turb.-M[FTU]'] > df['Turb_rolling_mean'] + StdThreshold*df['Turb_rolling_std']) | (df['Turb.-M[FTU]'] < df['Turb_rolling_mean'] - StdThreshold*df['Turb_rolling_std'])
         
-        df['SPM[mg/L]'] = convert_turbidity2SPM(df['Turb.-M[FTU]_filtered'], linregressmodel)
+        # replace outliers in turbidity data based on outlier flags with np.nan
+        df.loc[df['is_outlier'], 'Turb.-M[FTU]_filtered'] = np.nan 
+        
+        # replace outliers in turbidity based on UnrealThreshold
+        df.loc[df['Turb.-M[FTU]_filtered'] > UnrealThreshold, 'Turb.-M[FTU]_filtered'] = np.nan
+        
+        # convert filtered turbidity datato suspended matter concentration (spm)
+        df['SPM[mg/L]'] = opticalbackscatter_to_spm(
+            DataSeries=df['Turb.-M[FTU]_filtered'],
+            LinRegressModel=LinearRegressModel
+            )
+        
+        # search whether file has strucutre of USB_00XX in its name where XX are two numbers
         match = re.search(r"USB_00(\d{2})_", file)
         
+        # use numbers XX for identification since it is the SerialID of the instrument
         if match:
-            id = match.group(1)
-            index = np.where(seriallist == id)
-            loc = loclist[index][0]
-            dic[f"turb_{loc}_raw"] = (df["Turb.-M[FTU]"], "FTU")
-            dic[f"turb_{loc}"] = (df["Turb.-M[FTU]_filtered"], "FTU")
-            dic[f"temp_{loc}_raw"] = (df["Temp.[degC]"], "degC")
-            dic[f"time_{loc}"] = df["Temp.[degC]"].index
-            dic[f'SPM_{loc}'] = df['SPM[mg/L]']
+            id = match.group(1)  # retrieve serialid
+            index = np.where(SerialList == id)  # retrieve index of serialid from seriallist
+            loc = LocationList[index][0]  # retrieve location of instrument
+            
+            # save loaded data into result dictionary using the  location of instrument as identifier
+            resultdic[f"turb_{loc}_raw"] = (df["Turb.-M[FTU]"], "FTU")
+            resultdic[f"turb_{loc}"] = (df["Turb.-M[FTU]_filtered"], "FTU")
+            resultdic[f"temp_{loc}_raw"] = (df["Temp.[degC]"], "degC")
+            resultdic[f"time_{loc}"] = df["Temp.[degC]"].index
+            resultdic[f'SPM_{loc}'] = df['SPM[mg/L]']
         else:
             print("No corresponding serial number found on this equipment.")
-    return dic
+            
+    return resultdic
 
 def N2_bin_mean(bathymetry, slope, ctddata, depthinterval, upto4000,):
     import pandas as pd
